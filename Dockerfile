@@ -14,6 +14,7 @@ RUN groupadd -g "${GID}" linguaspark && useradd -l -u "${UID}" -g "${GID}" -m -d
 WORKDIR /home/linguaspark/
 USER linguaspark
 COPY --link --chown=linguaspark:linguaspark . .
+RUN git submodule update --init --recursive
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y --default-toolchain stable
 ENV RUSTFLAGS="-C target-cpu=x86-64-v2 -C linker=clang"
 RUN bash -c "source /opt/intel/oneapi/setvars.sh ; source ~/.cargo/env ; cargo build --release"
