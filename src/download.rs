@@ -53,6 +53,15 @@ impl ModelDownloader {
             base_url,
         }
     }
+    pub fn available(&self, from_lang: &str, to_lang: &str) -> Option<bool> {
+        let root = self.models.as_ref()?.as_object()?;
+        let models = root
+            .get("models")?
+            .as_object()?
+            .get(&format!("{}-{}", from_lang, to_lang))?
+            .as_array()?;
+        Some(!models.is_empty())
+    }
     async fn download_model(&self, from_lang: String, to_lang: String) -> Option<()> {
         let root = self.models.as_ref()?.as_object()?;
         info!("download_model root found");

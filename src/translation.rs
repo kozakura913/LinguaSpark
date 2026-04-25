@@ -62,19 +62,87 @@ pub async fn perform_translation(
     if from_code == to_code {
         return Ok((text.to_string(), from_code.to_string(), to_code.to_string()));
     }
-    state
-        .downloader
-        .load_model(&state.translator, &state.models, from_code, to_code)
-        .await?;
+    let loaded = if let Ok(models) = state.models.lock() {
+        models.contains(&(source_lang, target_lang))
+    } else {
+        false
+    };
+    let interlanguage = if loaded {
+        None
+    } else {
+        if state
+            .downloader
+            .available(from_code, to_code)
+            .unwrap_or(false)
+        {
+            state
+                .downloader
+                .load_model(&state.translator, &state.models, from_code, to_code)
+                .await?;
+            None
+        } else {
+            //to en
+            let interlanguage = "en";
+            let to_inter = state
+                .downloader
+                .available(from_code, interlanguage)
+                .unwrap_or(false);
+            let from_inter = state
+                .downloader
+                .available(interlanguage, to_code)
+                .unwrap_or(false);
+            if !to_inter {
+                return Err(AppError::TranslationError(format!(
+                    "Translation from '{}' to '{}' is not supported",
+                    from_code, interlanguage
+                )));
+            }
+            if !from_inter {
+                return Err(AppError::TranslationError(format!(
+                    "Translation from '{}' to '{}' is not supported",
+                    interlanguage, to_code
+                )));
+            }
+            state
+                .downloader
+                .load_model(&state.translator, &state.models, from_code, interlanguage)
+                .await?;
+            state
+                .downloader
+                .load_model(&state.translator, &state.models, interlanguage, to_code)
+                .await?;
+            Some(interlanguage)
+        }
+    };
 
-    if !state.translator.is_supported(from_code, to_code)? {
-        return Err(AppError::TranslationError(format!(
-            "Translation from '{}' to '{}' is not supported",
-            from_code, to_code
-        )));
-    }
-
-    let translated_text = state.translator.translate(from_code, to_code, text)?;
+    let translated_text = if let Some(interlanguage) = interlanguage {
+        let to_inter = state.translator.is_supported(from_code, interlanguage)?;
+        let from_inter = state.translator.is_supported(interlanguage, to_code)?;
+        if !to_inter {
+            return Err(AppError::TranslationError(format!(
+                "Translation from '{}' to '{}' is not supported",
+                from_code, interlanguage
+            )));
+        }
+        if !from_inter {
+            return Err(AppError::TranslationError(format!(
+                "Translation from '{}' to '{}' is not supported",
+                interlanguage, to_code
+            )));
+        }
+        let intertext = state.translator.translate(from_code, interlanguage, text)?;
+        state
+            .translator
+            .translate(interlanguage, to_code, &intertext)?
+    } else {
+        if !state.translator.is_supported(from_code, to_code)? {
+            return Err(AppError::TranslationError(format!(
+                "Translation from '{}' to '{}' is not supported",
+                from_code, to_code
+            )));
+        }
+        state.translator.translate(from_code, to_code, text)?
+    };
 
     Ok((translated_text, from_code.to_string(), to_code.to_string()))
 }
