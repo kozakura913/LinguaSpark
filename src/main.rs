@@ -8,7 +8,7 @@ use axum::{
 };
 use isolang::Language;
 use linguaspark_sys::Translator;
-use std::{fs, io, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, fs, io, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::{net::TcpListener, signal};
 use tower_http::{
     cors::{
@@ -16,8 +16,11 @@ use tower_http::{
     },
     trace::TraceLayer,
 };
-use tracing::{debug, error, info};
+use tracing::info;
 
+use crate::download::ModelDownloader;
+
+mod download;
 mod endpoint;
 mod translation;
 
@@ -65,27 +68,37 @@ impl IntoResponse for AppError {
 
 struct AppState {
     translator: Translator,
-    models: Vec<(Language, Language)>,
+    models: std::sync::Mutex<HashSet<(Language, Language)>>,
+    downloader: ModelDownloader,
 }
 
 fn load_models_manually(
     translator: &Translator,
     models_dir: &PathBuf,
-) -> Result<Vec<(Language, Language)>, AppError> {
-    let mut models = Vec::new();
+    models: &std::sync::Mutex<HashSet<(Language, Language)>>,
+) -> Result<(), AppError> {
+    let mut models = models
+        .lock()
+        .map_err(|e| AppError::ConfigError(format!("{:?}", e)))?;
 
     for entry in fs::read_dir(models_dir)? {
         let entry = entry?;
         let model_dir_path = entry.path();
         let language_pair = entry.file_name().to_string_lossy().into_owned();
 
-        info!("Looking for models in {}", model_dir_path.display());
-        translator.load_model(&language_pair, model_dir_path)?;
+        if language_pair.as_str() == "models.json" {
+            continue;
+        }
 
         if language_pair.len() >= 4 {
             let from_lang = translation::parse_language_code(&language_pair[0..2])?;
             let to_lang = translation::parse_language_code(&language_pair[2..4])?;
-            models.push((from_lang, to_lang));
+            if models.contains(&(from_lang, to_lang)) {
+                continue;
+            }
+            info!("Looking for models in {}", model_dir_path.display());
+            translator.load_model(&language_pair, model_dir_path)?;
+            models.insert((from_lang, to_lang));
         } else {
             return Err(AppError::ConfigError(format!(
                 "Invalid language pair format: '{}'. Expected format like 'enzh', 'jpen'",
@@ -96,7 +109,7 @@ fn load_models_manually(
         info!("Loaded model for language pair '{}'", language_pair);
     }
 
-    Ok(models)
+    Ok(())
 }
 
 async fn shutdown_signal() {
@@ -151,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
             }
             default_dir
         });
-
+    let downloader = ModelDownloader::new(models_dir.clone()).await;
     let num_workers = std::env::var(ENV_NUM_WORKERS)
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
@@ -169,10 +182,15 @@ async fn main() -> anyhow::Result<()> {
     let translator = Translator::new(num_workers).context("Failed to initialize translator")?;
 
     info!("Loading translation models from {}", models_dir.display());
-    let models = load_models_manually(&translator, &models_dir)
+    let models = std::sync::Mutex::new(HashSet::new());
+    load_models_manually(&translator, &models_dir, &models)
         .context("Failed to load translation models")?;
 
-    let app_state = Arc::new(AppState { translator, models });
+    let app_state = Arc::new(AppState {
+        translator,
+        models,
+        downloader,
+    });
 
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::mirror_request())

@@ -44,24 +44,12 @@ pub async fn perform_translation(
     to_lang: &str,
 ) -> Result<(String, String, String), AppError> {
     let source_lang = match from_lang.as_deref() {
-        None | Some("") | Some("auto") => {
-            if state.models.len() == 1 {
-                // If there's only one model, use it as the source language
-                state
-                    .models
-                    .first()
-                    .map(|model| model.0)
-                    .unwrap_or(Language::Eng)
-            } else {
-                Language::from_639_3(whichlang::detect_language(text).three_letter_code())
-                    .ok_or_else(|| {
-                        AppError::TranslationError(format!(
-                            "Failed to detect language for text: '{}'",
-                            text
-                        ))
-                    })?
-            }
-        }
+        None | Some("") | Some("auto") => Language::from_639_3(
+            whichlang::detect_language(text).three_letter_code(),
+        )
+        .ok_or_else(|| {
+            AppError::TranslationError(format!("Failed to detect language for text: '{}'", text))
+        })?,
         Some(code) => parse_language_code(code)?,
     };
 
@@ -74,6 +62,10 @@ pub async fn perform_translation(
     if from_code == to_code {
         return Ok((text.to_string(), from_code.to_string(), to_code.to_string()));
     }
+    state
+        .downloader
+        .load_model(&state.translator, &state.models, from_code, to_code)
+        .await?;
 
     if !state.translator.is_supported(from_code, to_code)? {
         return Err(AppError::TranslationError(format!(
