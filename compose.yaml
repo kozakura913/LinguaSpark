@@ -1,9 +1,6 @@
 services:
   linguaspark:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: linguaspark:latest
+    image: ghcr.io/kozakura913/linguaspark:main
     ports:
       - "3000:3000"
     volumes:

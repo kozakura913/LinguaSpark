@@ -2,8 +2,7 @@ use anyhow::Context;
 use axum::{
     Router,
     extract::Json,
-    http::{HeaderMap, StatusCode},
-    middleware::{self, Next},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -67,38 +66,6 @@ impl IntoResponse for AppError {
 struct AppState {
     translator: Translator,
     models: Vec<(Language, Language)>,
-}
-
-async fn auth_middleware(
-    headers: HeaderMap,
-    request: axum::extract::Request,
-    next: Next,
-) -> Result<Response, AppError> {
-    let expected_key = std::env::var(ENV_API_KEY).unwrap_or_default();
-
-    if !expected_key.is_empty() {
-        let header_key = headers
-            .get("Authorization")
-            .and_then(|header| header.to_str().ok())
-            .and_then(|auth| auth.strip_prefix("Bearer "));
-
-        let query_key = request.uri().query().and_then(|query| {
-            query.split('&').find_map(|pair| {
-                let mut parts = pair.split('=');
-                if let Some("token") = parts.next() {
-                    parts.next()
-                } else {
-                    None
-                }
-            })
-        });
-
-        if header_key != Some(&expected_key) && query_key != Some(&expected_key) {
-            debug!("Invalid API key");
-            return Err(AppError::Unauthorized);
-        }
-    }
-    Ok(next.run(request).await)
 }
 
 fn load_models_manually(
@@ -216,10 +183,6 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/translate", post(endpoint::translate))
-        .route("/kiss", post(endpoint::translate_kiss))
-        .route("/imme", post(endpoint::translate_immersive))
-        .route("/hcfy", post(endpoint::translate_hcfy))
-        .route("/deeplx", post(endpoint::translate_deeplx))
         .route("/detect", post(endpoint::detect_language))
         .route(
             "/health",
@@ -229,7 +192,6 @@ async fn main() -> anyhow::Result<()> {
                 }))
             }),
         )
-        .route_layer(middleware::from_fn(auth_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(app_state);
