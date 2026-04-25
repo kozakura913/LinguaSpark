@@ -1,0 +1,3 @@
+[submodule "linguaspark-sys"]
+	path = linguaspark-sys
+	url = https://github.com/kozakura913/linguaspark-sys.git

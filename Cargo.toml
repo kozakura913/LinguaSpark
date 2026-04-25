@@ -16,7 +16,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 whichlang = "0.1"
 
-linguaspark = { path = "./core" }
+linguaspark-sys = { path = "./linguaspark-sys" }
 
 [profile.release]
 strip = true

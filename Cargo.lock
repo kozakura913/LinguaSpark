@@ -302,23 +302,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
-name = "linguaspark"
-version = "0.1.0"
-dependencies = [
- "cmake",
- "intel-mkl-tool",
- "minreq",
- "thiserror",
-]
-
-[[package]]
 name = "linguaspark-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
  "isolang",
- "linguaspark",
+ "linguaspark-sys",
  "serde",
  "serde_json",
  "thiserror",
@@ -327,6 +317,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "whichlang",
+]
+
+[[package]]
+name = "linguaspark-sys"
+version = "0.1.0"
+dependencies = [
+ "cmake",
+ "intel-mkl-tool",
+ "minreq",
+ "thiserror",
 ]
 
 [[package]]

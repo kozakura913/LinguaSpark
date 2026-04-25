@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post},
 };
 use isolang::Language;
-use linguaspark::Translator;
+use linguaspark_sys::Translator;
 use std::{fs, io, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::{net::TcpListener, signal};
 use tower_http::{
@@ -41,7 +41,7 @@ enum AppError {
     Unauthorized,
 
     #[error("Translator error: {0}")]
-    TranslatorError(#[from] linguaspark::TranslatorError),
+    TranslatorError(#[from] linguaspark_sys::TranslatorError),
 
     #[error("Configuration error: {0}")]
     ConfigError(String),
