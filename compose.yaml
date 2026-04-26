@@ -4,7 +4,8 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./models:/app/models
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - ./models:/home/linguaspark/models
     environment:
       API_KEY: ""
     restart: unless-stopped
