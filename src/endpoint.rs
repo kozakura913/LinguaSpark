@@ -70,14 +70,14 @@ pub async fn translate(
             return Err(AppError::Unauthorized);
         }
     }
-    let (translated_text, _from_lang, to_lang) =
+    let (translated_text, from_lang, _to_lang) =
         perform_translation(&state, &request.q, request.source, &request.target).await?;
 
     Ok(Json(TranslationResponse {
         translated_text,
         detected_language: DetectedLanguage {
             confidence: 50.0, //dummy
-            language: to_lang,
+            language: from_lang,
         },
     }))
 }
