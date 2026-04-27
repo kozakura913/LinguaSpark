@@ -103,13 +103,20 @@ pub async fn perform_translation(
                     interlanguage, to_code
                 )));
             }
-            let download_to_inter=state
-                .downloader
-                .load_model(&state.translator, &state.models, from_code, interlanguage);
-            let download_from_inter=state
-                .downloader
-                .load_model(&state.translator, &state.models, interlanguage, to_code);
-            let (download_to_inter,download_from_inter)=tokio::join!(download_to_inter,download_from_inter);
+            let download_to_inter = state.downloader.load_model(
+                &state.translator,
+                &state.models,
+                from_code,
+                interlanguage,
+            );
+            let download_from_inter = state.downloader.load_model(
+                &state.translator,
+                &state.models,
+                interlanguage,
+                to_code,
+            );
+            let (download_to_inter, download_from_inter) =
+                tokio::join!(download_to_inter, download_from_inter);
             download_to_inter?;
             download_from_inter?;
             Some(interlanguage)

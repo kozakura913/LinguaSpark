@@ -86,7 +86,7 @@ fn load_models_manually(
         let model_dir_path = entry.path();
         let language_pair = entry.file_name().to_string_lossy().into_owned();
 
-        if language_pair.as_str() == "models.json" {
+        if language_pair.as_str() == "models.json" || language_pair.as_str() == "tmp" {
             continue;
         }
 
