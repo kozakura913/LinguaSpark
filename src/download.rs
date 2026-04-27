@@ -1,16 +1,16 @@
 use isolang::Language;
 use linguaspark_sys::Translator;
-use std::{collections::HashSet, io, path::PathBuf};
+use std::{collections::{HashMap, HashSet}, io, path::PathBuf, sync::Arc};
 
 use tracing::{error, info};
 
 use crate::{AppError, translation};
 
-#[derive(Clone)]
 pub(crate) struct ModelDownloader {
     models_dir: PathBuf,
     models: Option<serde_json::Value>,
     base_url: Option<String>,
+    lock:tokio::sync::Mutex<HashMap<String,Arc<tokio::sync::Mutex<()>>>>,
 }
 impl ModelDownloader {
     pub(crate) async fn new(models_dir: PathBuf) -> Self {
@@ -51,6 +51,7 @@ impl ModelDownloader {
             models_dir,
             models,
             base_url,
+            lock:tokio::sync::Mutex::new(HashMap::new()),
         }
     }
     pub fn available(&self, from_lang: &str, to_lang: &str) -> Option<bool> {
@@ -63,6 +64,18 @@ impl ModelDownloader {
         Some(!models.is_empty())
     }
     async fn download_model(&self, from_lang: String, to_lang: String) -> Option<()> {
+        let language_pair = format!("{}{}", from_lang, to_lang);
+        let lock={
+            let mut map=self.lock.lock().await;
+            if let Some(lock)=map.get(&language_pair){
+                lock.clone()
+            }else{
+                let lock=Arc::new(tokio::sync::Mutex::new(()));
+                map.insert(language_pair.clone(), lock.clone());
+                lock
+            }
+        };
+        let _=lock.lock();
         let root = self.models.as_ref()?.as_object()?;
         info!("download_model root found");
         let models = root
@@ -80,8 +93,7 @@ impl ModelDownloader {
             .get("path")?
             .as_str()?; //model.s2t.bin
         let model = files.get("model")?.as_object()?.get("path")?.as_str()?; //model.intgemm8.bin
-        info!("download_model all files found");
-        let language_pair = format!("{}{}", from_lang, to_lang);
+        info!("download_model all files found metadata");
         let mut path = self.models_dir.clone();
         path.push(&language_pair);
         if let Err(e) = tokio::fs::create_dir_all(&path).await {
@@ -91,7 +103,7 @@ impl ModelDownloader {
         let model = self.download(&language_pair, "model.intgemm8.bin", model);
         let vocab = async {
             if files.contains_key("vocab") {
-                info!("download_model dl vocab");
+                info!("model dl vocab...");
                 let vocab = files.get("vocab")?.as_object()?.get("path")?.as_str()?; //vocab.spm
                 self.download(&language_pair, "vocab.spm", vocab).await
             } else {
@@ -100,9 +112,9 @@ impl ModelDownloader {
                 let srcvocab = self.download(&language_pair, "srcvocab.spm", srcvocab);
                 let trgvocab = self.download(&language_pair, "trgvocab.spm", trgvocab);
                 let (srcvocab, trgvocab) = tokio::join!(srcvocab, trgvocab);
-                info!("download_model dl srcvocab");
+                info!("model dl srcvocab...");
                 srcvocab?;
-                info!("download_model dl trgvocab");
+                info!("model dl trgvocab...");
                 trgvocab
             }
         };
@@ -110,33 +122,47 @@ impl ModelDownloader {
         s2t?;
         model?;
         vocab?;
-        info!("download_model dl all");
+        info!("download model all ok");
         Some(())
     }
     async fn download(&self, language_pair: &str, name: &str, remote_path: &str) -> Option<()> {
         let mut path = self.models_dir.clone();
         path.push(language_pair);
         path.push(name);
+        if self.download0(&path, name, remote_path).await.is_none(){
+            error!("download failed {} {}",language_pair,name);
+            let _=tokio::fs::remove_file(path).await;
+            None
+        }else{
+            Some(())
+        }
+    }
+    async fn download0(&self, path: &PathBuf, name: &str, remote_path: &str) -> Option<()> {
         if tokio::fs::try_exists(&path).await.ok()? {
             return Some(());
         }
-        let req =
-            reqwest::Client::new().get(format!("{}/{}", self.base_url.as_ref()?, remote_path));
-        let resp = req.send().await.ok()?;
-        use futures_util::stream::TryStreamExt;
-        let byte_stream = resp
-            .bytes_stream()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
-        let reader = tokio_util::io::StreamReader::new(byte_stream);
-        let mut decoder = async_compression::tokio::bufread::GzipDecoder::new(reader);
-        let total_len = match tokio::fs::File::create(path).await {
-            Ok(mut file) => match tokio::io::copy(&mut decoder, &mut file).await {
-                Err(e) => {
-                    error!("download_model write {:?}", e);
-                    return None;
+        let total_len = match tokio::fs::File::create(&path).await {
+            Ok(mut file) => {
+                let req = reqwest::Client::new().get(format!(
+                    "{}/{}",
+                    self.base_url.as_ref()?,
+                    remote_path
+                ));
+                let resp = req.send().await.map_err(|e|error!("model download failed {} {:?}",name,e)).ok()?;
+                use futures_util::stream::TryStreamExt;
+                let byte_stream = resp
+                    .bytes_stream()
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+                let reader = tokio_util::io::StreamReader::new(byte_stream);
+                let mut decoder = async_compression::tokio::bufread::GzipDecoder::new(reader);
+                match tokio::io::copy(&mut decoder, &mut file).await {
+                    Err(e) => {
+                        error!("download_model write {:?}", e);
+                        return None;
+                    }
+                    Ok(len) => len,
                 }
-                Ok(len) => len,
-            },
+            }
             Err(e) => {
                 error!("download_model write {:?}", e);
                 return None;
