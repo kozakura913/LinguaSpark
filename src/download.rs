@@ -6,11 +6,12 @@ use tracing::{error, info};
 
 use crate::{AppError, translation};
 
+#[derive(Clone)]
 pub(crate) struct ModelDownloader {
     models_dir: PathBuf,
     models: Option<serde_json::Value>,
     base_url: Option<String>,
-    lock:tokio::sync::Mutex<HashMap<String,Arc<tokio::sync::Mutex<()>>>>,
+    lock:Arc<tokio::sync::Mutex<HashMap<String,Arc<tokio::sync::Mutex<()>>>>>,
 }
 impl ModelDownloader {
     pub(crate) async fn new(models_dir: PathBuf) -> Self {
@@ -51,7 +52,7 @@ impl ModelDownloader {
             models_dir,
             models,
             base_url,
-            lock:tokio::sync::Mutex::new(HashMap::new()),
+            lock:Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
     pub fn available(&self, from_lang: &str, to_lang: &str) -> Option<bool> {
@@ -143,11 +144,13 @@ impl ModelDownloader {
         }
         let total_len = match tokio::fs::File::create(&path).await {
             Ok(mut file) => {
-                let req = reqwest::Client::new().get(format!(
+                let url=format!(
                     "{}/{}",
                     self.base_url.as_ref()?,
                     remote_path
-                ));
+                );
+                info!("download {} -> {}",url,&path.to_string_lossy());
+                let req = reqwest::Client::new().get(url);
                 let resp = req.send().await.map_err(|e|error!("model download failed {} {:?}",name,e)).ok()?;
                 use futures_util::stream::TryStreamExt;
                 let byte_stream = resp
@@ -191,10 +194,17 @@ impl ModelDownloader {
         }
         let from_lang_s = from_lang_s.to_string();
         let to_lang_s = to_lang_s.to_string();
-        if self.download_model(from_lang_s, to_lang_s).await.is_none() {
-            return Err(AppError::TranslationError(
-                "model download failed".to_string(),
-            ));
+        let cloned_self=self.clone();
+        let download_job=tokio::runtime::Handle::current().spawn(async move{
+            cloned_self.download_model(from_lang_s, to_lang_s).await
+        });
+        match download_job.await{
+            Ok(Some(_))=>{},
+            Ok(None)|Err(_)=>{
+                return Err(AppError::TranslationError(
+                    "model download failed".to_string(),
+                ));
+            },
         }
         let mut models = models
             .lock()
